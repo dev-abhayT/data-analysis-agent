@@ -9,6 +9,7 @@ import structlog
 from graph.state import AgentState
 from llm.client import LLMClient
 from tools.executor import execute_pandas_code
+from tools.profiler import _read_csv_robust
 
 log = structlog.get_logger()
 
@@ -106,7 +107,7 @@ def _load_dataframes(dataset_paths: dict[str, str]) -> dict[str, pd.DataFrame]:
     for _ds_id, file_path in dataset_paths.items():
         suffix = Path(file_path).suffix.lower()
         if suffix == ".csv":
-            df = pd.read_csv(file_path)
+            df = _read_csv_robust(file_path)
         elif suffix in (".xlsx", ".xls"):
             df = pd.read_excel(file_path)
         else:
@@ -124,7 +125,7 @@ def _dataset_summary(dataset_paths: dict[str, str]) -> str:
         try:
             suffix = Path(file_path).suffix.lower()
             if suffix == ".csv":
-                df = pd.read_csv(file_path, nrows=0)
+                df = _read_csv_robust(file_path).iloc[:0]
             elif suffix in (".xlsx", ".xls"):
                 df = pd.read_excel(file_path, nrows=0)
             else:
@@ -144,7 +145,7 @@ def _dataset_detail(dataset_paths: dict[str, str]) -> str:
         try:
             suffix = Path(file_path).suffix.lower()
             if suffix == ".csv":
-                df = pd.read_csv(file_path, nrows=20)
+                df = _read_csv_robust(file_path).head(20)
             elif suffix in (".xlsx", ".xls"):
                 df = pd.read_excel(file_path, nrows=20)
             else:
