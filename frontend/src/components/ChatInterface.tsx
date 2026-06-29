@@ -5,6 +5,38 @@ import { SummaryTable } from './SummaryTable'
 import { CodeTrace } from './CodeTrace'
 import { TokenCost } from './TokenCost'
 import { ExportButton } from './ExportButton'
+import { ChartView } from './ChartView'
+
+const THINKING_PHRASES = [
+  'Analyzing your data…',
+  'Running the numbers…',
+  'Looking through the dataset…',
+  'Computing insights…',
+  'Thinking…',
+  'Preparing your answer…',
+]
+
+function ThinkingPlaceholder() {
+  const [idx, setIdx] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setIdx(i => (i + 1) % THINKING_PHRASES.length), 1800)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <div className="flex items-center gap-2 text-sm text-gray-400">
+      <span className="flex gap-0.5">
+        {[0, 1, 2].map(i => (
+          <span
+            key={i}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-gray-300 animate-bounce"
+            style={{ animationDelay: `${i * 150}ms` }}
+          />
+        ))}
+      </span>
+      <span className="transition-opacity duration-300">{THINKING_PHRASES[idx]}</span>
+    </div>
+  )
+}
 
 interface Props {
   messages: ChatMessage[]
@@ -80,13 +112,20 @@ export function ChatInterface({ messages, onSendMessage, streaming, pendingInput
                   </div>
                 ) : (
                   <>
-                    <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-                      {msg.content}
-                      {msg.streaming && (
-                        <span className="inline-block w-0.5 h-4 bg-gray-700 ml-0.5 animate-pulse align-text-bottom" />
-                      )}
-                    </p>
-                    {msg.summary_table && (
+                    {msg.streaming && !msg.content ? (
+                      <ThinkingPlaceholder />
+                    ) : (
+                      <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+                        {msg.content}
+                        {msg.streaming && (
+                          <span className="inline-block w-0.5 h-4 bg-gray-700 ml-0.5 animate-pulse align-text-bottom" />
+                        )}
+                      </p>
+                    )}
+                    {msg.chart_data && !msg.streaming && (
+                      <ChartView chart={msg.chart_data} />
+                    )}
+                    {msg.summary_table && !msg.chart_data && (
                       <SummaryTable
                         columns={msg.summary_table.columns}
                         rows={msg.summary_table.rows}

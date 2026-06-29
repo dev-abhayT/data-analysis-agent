@@ -1,6 +1,34 @@
-import json
+import numpy as np
 import pandas as pd
 from pathlib import Path
+
+
+def _read_csv_robust(file_path: str) -> pd.DataFrame:
+    """Try multiple encodings and fallback options to parse a CSV file."""
+    encodings = ["utf-8", "utf-8-sig", "latin-1", "cp1252"]
+    last_exc: Exception = RuntimeError("unknown error")
+    for encoding in encodings:
+        for engine in ("c", "python"):
+            try:
+                kwargs: dict = {
+                    "encoding": encoding,
+                    "on_bad_lines": "skip",
+                    "engine": engine,
+                }
+                if engine == "python":
+                    # auto-detect separator when the C engine failed
+                    kwargs["sep"] = None
+                    kwargs["encoding_errors"] = "replace"
+                return pd.read_csv(file_path, **kwargs)
+            except UnicodeDecodeError:
+                last_exc = UnicodeDecodeError("utf-8", b"", 0, 1, "bad encoding")
+                break  # try next encoding
+            except Exception as exc:
+                last_exc = exc
+    raise ValueError(
+        f"Could not parse this CSV file — check that it is valid and not corrupted. "
+        f"Detail: {last_exc}"
+    )
 
 
 def profile_dataset(file_path: str) -> dict:
@@ -19,7 +47,7 @@ def profile_dataset(file_path: str) -> dict:
     suffix = path.suffix.lower()
     try:
         if suffix == ".csv":
-            df = pd.read_csv(file_path)
+            df = _read_csv_robust(file_path)
         elif suffix in (".xlsx", ".xls"):
             df = pd.read_excel(file_path)
         else:
@@ -35,8 +63,8 @@ def profile_dataset(file_path: str) -> dict:
     for col in df.columns:
         non_null = df[col].dropna()
         samples = non_null.head(5).tolist()
-        # Convert numpy types to Python primitives
-        samples = [s.item() if hasattr(s, "item") else s for s in samples]
+        # Convert numpy scalar types to Python primitives safely
+        samples = [s.item() if isinstance(s, np.generic) else s for s in samples]
         sample_values[col] = [str(s) for s in samples]
 
     return {

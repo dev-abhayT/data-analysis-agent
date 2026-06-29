@@ -4,7 +4,7 @@ import { FileUploader } from '@/components/FileUploader'
 import { ProfilePanel } from '@/components/ProfilePanel'
 import { StarterQuestions } from '@/components/StarterQuestions'
 import { ChatInterface } from '@/components/ChatInterface'
-import { Dataset, ChatMessage } from '@/lib/types'
+import { Dataset, ChatMessage, ChartData } from '@/lib/types'
 import { createSession, getSession, submitQuery, openStream, deleteDataset } from '@/lib/api'
 
 export default function Home() {
@@ -142,6 +142,12 @@ export default function Home() {
                   rows: data.rows as (string | number | null)[][],
                 },
               }
+            : m
+        ))
+      } else if (type === 'chart') {
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId
+            ? { ...m, chart_data: data as unknown as ChartData }
             : m
         ))
       } else if (type === 'code') {

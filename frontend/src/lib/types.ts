@@ -30,12 +30,20 @@ export interface SessionDetail {
   queries: QueryResult[]
 }
 
+export interface ChartData {
+  chart_type: 'bar' | 'line' | 'pie'
+  x_key: string
+  y_key: string
+  data: Record<string, string | number | null>[]
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'agent'
   content: string
   streaming?: boolean
   summary_table?: { columns: string[]; rows: (string | number | null)[][] } | null
+  chart_data?: ChartData | null
   error?: string
   clarification?: string
   // Phase 2 additions:

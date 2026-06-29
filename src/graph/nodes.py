@@ -50,6 +50,41 @@ _TABLE_KEYWORDS = {
     "biggest", "sort", "sorted", "order", "ordered",
 }
 
+_DATE_PATTERN = re.compile(
+    r"\d{4}[-/]\d{1,2}|\d{1,2}[-/]\d{4}|Q[1-4]\s*\d{4}|"
+    r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_chart(table: dict) -> dict | None:
+    """Return a chart spec dict if the table is suitable for charting, else None."""
+    columns = table.get("columns", [])
+    rows = table.get("rows", [])
+    if len(columns) < 2 or len(rows) < 2 or len(rows) > 20:
+        return None
+    # Second column must be numeric
+    try:
+        numeric_vals = [r[1] for r in rows if r[1] is not None]
+        if not numeric_vals or not all(isinstance(v, (int, float)) for v in numeric_vals):
+            return None
+    except (IndexError, TypeError):
+        return None
+
+    x_key, y_key = columns[0], columns[1]
+    data = [{x_key: r[0], y_key: r[1]} for r in rows if len(r) >= 2]
+
+    # Choose chart type
+    first_x = str(rows[0][0]) if rows[0][0] is not None else ""
+    if _DATE_PATTERN.search(first_x):
+        chart_type = "line"
+    elif len(rows) <= 6:
+        chart_type = "pie"
+    else:
+        chart_type = "bar"
+
+    return {"chart_type": chart_type, "x_key": x_key, "y_key": y_key, "data": data}
+
 
 def _load_system_prompt() -> str:
     return _ANALYSIS_PROMPT_PATH.read_text(encoding="utf-8").strip()
@@ -560,10 +595,13 @@ def finalize(state: AgentState) -> AgentState:
                     json.dumps({"type": "clarification", "question": clarification_question})
                 )
             else:
-                # Table event
+                # Table event + chart event
                 summary = state.get("summary_table_json")
                 if summary:
                     stream_callback(json.dumps({"type": "table", **summary}))
+                    chart = _detect_chart(summary)
+                    if chart:
+                        stream_callback(json.dumps({"type": "chart", **chart}))
 
                 # Code event — emit even if generated_code is empty string (describe path)
                 generated_code = state.get("generated_code")
