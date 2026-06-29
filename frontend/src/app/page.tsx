@@ -1,77 +1,283 @@
 'use client'
-
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { FileUploader } from '@/components/FileUploader'
+import { ProfilePanel } from '@/components/ProfilePanel'
+import { StarterQuestions } from '@/components/StarterQuestions'
+import { ChatInterface } from '@/components/ChatInterface'
+import { Dataset, ChatMessage } from '@/lib/types'
+import { createSession, getSession, submitQuery, openStream } from '@/lib/api'
 
 export default function Home() {
-  const [input, setInput] = useState('')
-  const [result, setResult] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+  const [initLoading, setInitLoading] = useState(true)
+  const [datasets, setDatasets] = useState<Dataset[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [streaming, setStreaming] = useState(false)
+  const [pendingInput, setPendingInput] = useState('')
+  const esRef = useRef<EventSource | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!input.trim()) return
-    setLoading(true)
-    setError(null)
-    setResult(null)
-    try {
-      const res = await fetch('/runs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_text: input }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail?.message ?? `Request failed (${res.status})`)
-      } else if (data.data?.error) {
-        setError(data.data.error)
-      } else {
-        setResult(data.data.output_text)
+  // ── Session init ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    async function init() {
+      setInitLoading(true)
+      const storedId = localStorage.getItem('session_id')
+      if (storedId) {
+        try {
+          const detail = await getSession(storedId)
+          setSessionId(detail.session_id)
+          setDatasets(detail.datasets)
+          // Restore completed queries as chat messages
+          const restored: ChatMessage[] = []
+          for (const q of detail.queries) {
+            if (q.status === 'completed' && q.answer_text) {
+              restored.push({
+                id: `u-${q.query_id}`,
+                role: 'user',
+                content: q.question,
+              })
+              restored.push({
+                id: `a-${q.query_id}`,
+                role: 'agent',
+                content: q.answer_text,
+                summary_table: q.summary_table_json ?? null,
+              })
+            }
+          }
+          setMessages(restored)
+          setInitLoading(false)
+          return
+        } catch {
+          // Session not found or server error — create a new one
+          localStorage.removeItem('session_id')
+        }
       }
+
+      try {
+        const s = await createSession()
+        localStorage.setItem('session_id', s.session_id)
+        setSessionId(s.session_id)
+      } catch {
+        setSessionError('Could not connect to the server. Make sure it is running on port 8001.')
+      } finally {
+        setInitLoading(false)
+      }
+    }
+    init()
+  }, [])
+
+  // Clean up EventSource on unmount
+  useEffect(() => {
+    return () => {
+      esRef.current?.close()
+    }
+  }, [])
+
+  // ── Upload success ────────────────────────────────────────────────────────
+  function handleUploadSuccess(dataset: Dataset) {
+    setDatasets(prev => [...prev, dataset])
+  }
+
+  // ── Send message & stream answer ─────────────────────────────────────────
+  const handleSendMessage = useCallback(async (question: string) => {
+    if (!sessionId || streaming) return
+
+    const userMsgId = `u-${Date.now()}`
+    const agentMsgId = `a-${Date.now()}`
+
+    setMessages(prev => [
+      ...prev,
+      { id: userMsgId, role: 'user', content: question },
+      { id: agentMsgId, role: 'agent', content: '', streaming: true },
+    ])
+    setStreaming(true)
+
+    // Submit query to get a query_id
+    let queryId: string
+    try {
+      const result = await submitQuery(sessionId, question)
+      queryId = result.query_id
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to submit question'
+      setMessages(prev => prev.map(m =>
+        m.id === agentMsgId ? { ...m, error: msg, streaming: false, content: '' } : m
+      ))
+      setStreaming(false)
+      return
+    }
+
+    // Open SSE stream
+    const es = openStream(sessionId, queryId)
+    esRef.current = es
+
+    es.onmessage = (event: MessageEvent) => {
+      let data: Record<string, unknown>
+      try {
+        data = JSON.parse(event.data)
+      } catch {
+        return
+      }
+
+      const type = data.type as string
+
+      if (type === 'token') {
+        const chunk = (data.content as string) ?? ''
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId ? { ...m, content: m.content + chunk } : m
+        ))
+      } else if (type === 'table') {
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId
+            ? {
+                ...m,
+                summary_table: {
+                  columns: data.columns as string[],
+                  rows: data.rows as (string | number | null)[][],
+                },
+              }
+            : m
+        ))
+      } else if (type === 'clarification') {
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId
+            ? { ...m, clarification: data.question as string, streaming: false }
+            : m
+        ))
+        setStreaming(false)
+        es.close()
+      } else if (type === 'done') {
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId ? { ...m, streaming: false } : m
+        ))
+        setStreaming(false)
+        es.close()
+      } else if (type === 'error') {
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId
+            ? { ...m, error: (data.message as string) ?? 'An error occurred', content: '', streaming: false }
+            : m
+        ))
+        setStreaming(false)
+        es.close()
+      }
+    }
+
+    es.onerror = () => {
+      // Only show error if we haven't received any content yet
+      setMessages(prev => prev.map(m => {
+        if (m.id !== agentMsgId) return m
+        if (m.content || m.error) return { ...m, streaming: false }
+        return { ...m, error: 'Stream disconnected — please try again', streaming: false }
+      }))
+      setStreaming(false)
+      es.close()
+    }
+  }, [sessionId, streaming])
+
+  // ── Starter question chip clicked ─────────────────────────────────────────
+  function handleStarterSelect(question: string) {
+    setPendingInput(question)
+  }
+
+  // ── New session (on session-not-found error) ──────────────────────────────
+  async function handleNewSession() {
+    setSessionError(null)
+    localStorage.removeItem('session_id')
+    setInitLoading(true)
+    try {
+      const s = await createSession()
+      localStorage.setItem('session_id', s.session_id)
+      setSessionId(s.session_id)
+      setDatasets([])
+      setMessages([])
     } catch {
-      setError('Network error — is the server running?')
+      setSessionError('Could not create a new session. Is the server running?')
     } finally {
-      setLoading(false)
+      setInitLoading(false)
     }
   }
 
+  // ── Collect all starter questions from all datasets (max 3) ──────────────
+  const allStarterQuestions = datasets
+    .flatMap(d => d.starter_questions ?? [])
+    .slice(0, 3)
+
+  // ── Render states ─────────────────────────────────────────────────────────
+  if (initLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      </div>
+    )
+  }
+
+  if (sessionError) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 p-8">
+        <div className="text-center space-y-4 max-w-sm">
+          <p className="text-red-600 font-medium">{sessionError}</p>
+          <button
+            onClick={handleNewSession}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Main layout ───────────────────────────────────────────────────────────
   return (
-    <main className="mx-auto max-w-2xl px-4 py-16">
-      <h1 className="mb-8 text-3xl font-bold tracking-tight">Agent</h1>
+    <div className="flex h-screen flex-col bg-gray-50">
+      {/* Header */}
+      <header className="shrink-0 border-b border-gray-200 bg-white px-6 py-3 flex items-center justify-between shadow-sm">
+        <h1 className="text-lg font-semibold text-gray-900">Data Analysis Agent</h1>
+        <span className="text-xs text-gray-400 font-mono hidden sm:block">
+          Session {sessionId?.slice(0, 8)}…
+        </span>
+      </header>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <textarea
-          className="w-full rounded-lg border border-gray-300 p-3 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          rows={4}
-          placeholder="Enter text to transform…"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? 'Running…' : 'Run'}
-        </button>
-      </form>
+      {/* Two-panel body */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left panel — file upload + profile + starter questions */}
+        <div className="w-72 shrink-0 overflow-y-auto border-r border-gray-200 bg-white p-4 space-y-4">
+          <div>
+            <p className="mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Data files</p>
+            <FileUploader
+              sessionId={sessionId!}
+              onUploadSuccess={handleUploadSuccess}
+              disabled={streaming || datasets.length >= 3}
+            />
+            {datasets.length >= 3 && (
+              <p className="mt-1.5 text-xs text-gray-400 text-center">Max 3 files per session</p>
+            )}
+          </div>
 
-      {error && (
-        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+          {datasets.map(d => (
+            <ProfilePanel key={d.dataset_id} dataset={d} />
+          ))}
+
+          {allStarterQuestions.length > 0 && (
+            <StarterQuestions
+              questions={allStarterQuestions}
+              onSelect={handleStarterSelect}
+              disabled={streaming}
+            />
+          )}
         </div>
-      )}
 
-      {result && (
-        <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4 text-sm whitespace-pre-wrap shadow-sm">
-          {result}
+        {/* Right panel — chat */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <ChatInterface
+            messages={messages}
+            onSendMessage={handleSendMessage}
+            streaming={streaming}
+            pendingInput={pendingInput}
+            onPendingInputClear={() => setPendingInput('')}
+          />
         </div>
-      )}
-
-      {!result && !error && !loading && (
-        <p className="mt-10 text-center text-sm text-gray-400">Results will appear here.</p>
-      )}
-    </main>
+      </div>
+    </div>
   )
 }

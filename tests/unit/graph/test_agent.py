@@ -1,4 +1,4 @@
 def test_graph_compiles():
-    """Graph compiles without requiring any env vars."""
-    from graph.agent import agentic_ai
-    assert agentic_ai is not None
+    """Analysis graph compiles without requiring any env vars."""
+    from graph.agent import analysis_agent
+    assert analysis_agent is not None

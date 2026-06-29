@@ -8,6 +8,7 @@ class Settings(BaseSettings):
         env_file=".env",
         case_sensitive=False,
         extra="ignore",
+        populate_by_name=True,
     )
 
     database_url: str = Field(default="sqlite:///./data/agent.db")
@@ -20,6 +21,16 @@ class Settings(BaseSettings):
     # Provider keys — set exactly one
     anthropic_api_key: str = Field(default="")
     gemini_api_key: str = Field(default="")
+
+    # Gemini model (defaults to gemini-2.5-flash)
+    gemini_model: str = Field(default="gemini-2.5-flash")
+
+    # File upload settings
+    upload_dir: str = Field(default="data/uploads")
+    max_upload_bytes: int = Field(default=104857600)  # 100 MB
+
+    # Server port — note: env var is PORT (no prefix) via alias
+    port: int = Field(default=8001, alias="PORT")
 
 
 _settings: Settings | None = None
