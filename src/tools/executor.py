@@ -1,5 +1,6 @@
 import ast
 from typing import Any
+import numpy as np
 import pandas as pd
 
 # Forbidden names that must never appear in generated code
@@ -91,6 +92,10 @@ def execute_pandas_code(
     if isinstance(result, pd.Series):
         result = result.reset_index()
 
+    # numpy arrays and pandas Index (e.g. df.columns) → treat as a Series
+    if isinstance(result, (np.ndarray, pd.Index)):
+        result = pd.Series(result, name="value").reset_index(drop=True).to_frame()
+
     if isinstance(result, pd.DataFrame):
         limited = result.head(max_rows)
         columns = list(limited.columns)
@@ -105,8 +110,13 @@ def execute_pandas_code(
 
 def _serialize(val: Any) -> Any:
     """Convert numpy/pandas types to JSON-serializable Python types."""
-    if hasattr(val, "item"):
+    # numpy scalar types (int64, float64, bool_, etc.) — safe to call .item()
+    if isinstance(val, np.generic):
         return val.item()
+    # numpy arrays or pandas Index — should not reach here after the DataFrame path,
+    # but guard anyway by converting to list
+    if isinstance(val, (np.ndarray, pd.Index)):
+        return val.tolist()
     try:
         if not isinstance(val, (list, dict, str, bool)) and pd.isna(val):
             return None

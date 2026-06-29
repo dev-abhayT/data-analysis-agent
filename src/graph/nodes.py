@@ -34,6 +34,9 @@ _META_PATTERNS = [
     r"explain (this|the) (data|dataset|file|csv)",
     r"(data|dataset).{0,20}contain",
     r"(data|dataset).{0,20}represent",
+    r"(what|which|list|show).{0,30}columns",
+    r"columns.{0,30}(data|dataset|file|available|there|exist)",
+    r"what (fields|features|variables|attributes)",
 ]
 
 
