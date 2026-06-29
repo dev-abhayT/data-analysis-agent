@@ -19,16 +19,21 @@ _ANALYSIS_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "analysis.md"
 # ---------------------------------------------------------------------------
 
 _META_PATTERNS = [
-    r"what is this (data|dataset|file|csv)",
+    r"what (is|'s|was) (this|the|a) (data|dataset|file|csv)",
+    r"(data|dataset|file|csv).{0,40}about",
+    r"about.{0,40}(data|dataset|file|csv)",
     r"what are (some |the )?(interesting |key |main )?(insights|observations|patterns|trends)",
     r"\bdescribe\b",
     r"\bsummarize\b",
     r"\bsummary\b",
     r"tell me about",
     r"\boverview\b",
-    r"what does this (data|dataset|file|csv)",
+    r"what does (this|the) (data|dataset|file|csv)",
     r"what('s| is) in (this|the) (data|dataset|file|csv)",
     r"give me (a )?(summary|overview|description)",
+    r"explain (this|the) (data|dataset|file|csv)",
+    r"(data|dataset).{0,20}contain",
+    r"(data|dataset).{0,20}represent",
 ]
 
 
