@@ -6,7 +6,15 @@ def after_route(state: AgentState) -> str:
         return "handle_error"
     if state.get("route_decision") == "clarify":
         return "ask_clarification"
+    if state.get("route_decision") == "describe":
+        return "describe_dataset"
     return "generate_code"
+
+
+def after_describe(state: AgentState) -> str:
+    if state.get("error"):
+        return "handle_error"
+    return "stream_answer"
 
 
 def after_execute(state: AgentState) -> str:

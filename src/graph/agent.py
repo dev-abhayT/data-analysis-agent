@@ -9,11 +9,13 @@ from graph.nodes import (
     stream_answer,
     handle_error,
     finalize,
+    describe_dataset,
 )
 from graph.edges import (
     after_route,
     after_execute,
     after_stream,
+    after_describe,
 )
 
 
@@ -21,6 +23,7 @@ def _build_graph() -> StateGraph:
     g = StateGraph(AgentState)
 
     g.add_node("route_question", route_question)
+    g.add_node("describe_dataset", describe_dataset)
     g.add_node("ask_clarification", ask_clarification)
     g.add_node("generate_code", generate_code)
     g.add_node("execute_code", execute_code)
@@ -36,6 +39,16 @@ def _build_graph() -> StateGraph:
         {
             "ask_clarification": "ask_clarification",
             "generate_code": "generate_code",
+            "describe_dataset": "describe_dataset",
+            "handle_error": "handle_error",
+        },
+    )
+
+    g.add_conditional_edges(
+        "describe_dataset",
+        after_describe,
+        {
+            "stream_answer": "stream_answer",
             "handle_error": "handle_error",
         },
     )

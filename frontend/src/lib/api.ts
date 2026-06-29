@@ -51,3 +51,30 @@ export async function submitQuery(
 export function openStream(sessionId: string, queryId: string): EventSource {
   return new EventSource(`${API_BASE}/api/sessions/${sessionId}/queries/${queryId}/stream`)
 }
+
+export async function deleteDataset(sessionId: string, datasetId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/datasets/${datasetId}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok && res.status !== 204) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.detail?.message ?? `Delete failed: ${res.status}`)
+  }
+}
+
+export async function exportQueryCsv(sessionId: string, queryId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/queries/${queryId}/export`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.detail?.message ?? `Export failed: ${res.status}`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `query_${queryId.slice(0, 8)}.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}

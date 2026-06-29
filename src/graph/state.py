@@ -14,8 +14,9 @@ class AgentState(TypedDict, total=False):
     conversation_history: list[dict]     # [{role, content}] prior turns
 
     # Routing
-    route_decision: str                  # "clarify" | "execute"
+    route_decision: str                  # "clarify" | "execute" | "describe"
     route_reasoning: str
+    is_describe_path: bool
 
     # Clarification
     clarification_question: str

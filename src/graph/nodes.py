@@ -14,6 +14,28 @@ log = structlog.get_logger()
 
 _ANALYSIS_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "analysis.md"
 
+# ---------------------------------------------------------------------------
+# Meta-question detection (describe path)
+# ---------------------------------------------------------------------------
+
+_META_PATTERNS = [
+    r"what is this (data|dataset|file|csv)",
+    r"what are (some |the )?(interesting |key |main )?(insights|observations|patterns|trends)",
+    r"\bdescribe\b",
+    r"\bsummarize\b",
+    r"\bsummary\b",
+    r"tell me about",
+    r"\boverview\b",
+    r"what does this (data|dataset|file|csv)",
+    r"what('s| is) in (this|the) (data|dataset|file|csv)",
+    r"give me (a )?(summary|overview|description)",
+]
+
+
+def _is_meta_question(question: str) -> bool:
+    q = question.lower().strip()
+    return any(re.search(p, q) for p in _META_PATTERNS)
+
 _TABLE_KEYWORDS = {
     "top", "most", "least", "rank", "ranking", "compare", "comparison",
     "highest", "lowest", "best", "worst", "largest", "smallest",
@@ -110,6 +132,11 @@ def route_question(state: AgentState) -> AgentState:
         dataset_paths = state.get("dataset_paths", {})
         conversation_history = state.get("conversation_history", [])
 
+        # Pre-LLM check: if the question is a meta/describe question, skip the LLM call
+        if _is_meta_question(question):
+            log.info("route_question", decision="describe", reason="meta_pattern_match")
+            return {**state, "route_decision": "describe", "route_reasoning": "meta/describe question detected"}
+
         dataset_info = _dataset_summary(dataset_paths)
 
         history_text = ""
@@ -139,6 +166,81 @@ def route_question(state: AgentState) -> AgentState:
         return {**state, "route_decision": decision, "route_reasoning": reasoning}
     except Exception as exc:
         log.error("route_question_error", error=str(exc))
+        return {**state, "error": str(exc)}
+
+
+def describe_dataset(state: AgentState) -> AgentState:
+    """Describe the dataset using its profiling data stored in the DB."""
+    try:
+        session_id = state.get("session_id", "")
+
+        # Read profile from DB
+        from db.session import create_db_session
+        from db.models import Dataset as DatasetModel
+
+        profile_lines: list[str] = []
+        with create_db_session() as db:
+            datasets = (
+                db.query(DatasetModel)
+                .filter(DatasetModel.session_id == session_id)
+                .all()
+            )
+            for ds in datasets:
+                profile_lines.append(f"File: {ds.filename}")
+                profile_lines.append(f"  Rows: {ds.row_count}")
+
+                if ds.column_names_json:
+                    col_names = json.loads(ds.column_names_json)
+                else:
+                    col_names = []
+                profile_lines.append(f"  Columns: {col_names}")
+
+                if ds.column_types_json:
+                    col_types = json.loads(ds.column_types_json)
+                    for col, dtype in col_types.items():
+                        profile_lines.append(f"    - {col}: type={dtype}")
+
+                if ds.null_counts_json:
+                    null_counts = json.loads(ds.null_counts_json)
+                    non_zero_nulls = {k: v for k, v in null_counts.items() if v > 0}
+                    if non_zero_nulls:
+                        profile_lines.append(f"  Columns with nulls: {non_zero_nulls}")
+
+                if ds.sample_values_json:
+                    sample_values = json.loads(ds.sample_values_json)
+                    profile_lines.append("  Sample values per column:")
+                    for col, samples in sample_values.items():
+                        profile_lines.append(f"    - {col}: {samples}")
+
+        profile_text = "\n".join(profile_lines) if profile_lines else "No profile data available."
+
+        prompt = (
+            f"You are a data analyst. Based on the following dataset profile, write a clear "
+            f"2-3 paragraph description of what this dataset contains and what it can be used for. "
+            f"Then provide 3-5 bullet points highlighting the most interesting observations or patterns "
+            f"you notice.\n\n"
+            f"Dataset profile:\n{profile_text}\n\n"
+            f"Format your response as:\n"
+            f"[2-3 paragraph description]\n\n"
+            f"**Interesting observations:**\n"
+            f"• [observation 1]\n"
+            f"• [observation 2]\n"
+            f"• [observation 3]\n"
+            f"(up to 5 bullets)"
+        )
+
+        answer_text = LLMClient().call_model(prompt)
+
+        log.info("describe_dataset", session_id=session_id, answer_length=len(answer_text))
+        return {
+            **state,
+            "answer_text": answer_text,
+            "generated_code": "",
+            "reasoning_trace": "",
+            "is_describe_path": True,
+        }
+    except Exception as exc:
+        log.error("describe_dataset_error", error=str(exc))
         return {**state, "error": str(exc)}
 
 
@@ -277,10 +379,33 @@ def execute_code(state: AgentState) -> AgentState:
 
 def stream_answer(state: AgentState) -> AgentState:
     try:
+        is_describe = state.get("is_describe_path", False)
+        stream_callback = state.get("stream_callback")
+
+        if is_describe:
+            # The answer text was already generated by describe_dataset; stream it word-by-word
+            answer_text = state.get("answer_text", "")
+            if stream_callback and answer_text:
+                words = answer_text.split(" ")
+                for i, word in enumerate(words):
+                    chunk = word if i == len(words) - 1 else word + " "
+                    try:
+                        stream_callback(json.dumps({"type": "token", "content": chunk}))
+                    except Exception:
+                        pass
+            log.info("stream_answer_done", path="describe", answer_length=len(answer_text))
+            return {
+                **state,
+                "answer_text": answer_text,
+                "summary_table_json": None,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "cost_usd": 0.0,
+            }
+
         question = state.get("question", "")
         execution_result = state.get("execution_result") or {}
         reasoning_trace = state.get("reasoning_trace", "")
-        stream_callback = state.get("stream_callback")
 
         result_json = json.dumps(execution_result)
 
@@ -432,9 +557,9 @@ def finalize(state: AgentState) -> AgentState:
                 if summary:
                     stream_callback(json.dumps({"type": "table", **summary}))
 
-                # Code event
+                # Code event — emit even if generated_code is empty string (describe path)
                 generated_code = state.get("generated_code")
-                if generated_code:
+                if generated_code is not None:
                     stream_callback(
                         json.dumps({
                             "type": "code",

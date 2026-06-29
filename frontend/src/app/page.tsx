@@ -5,7 +5,7 @@ import { ProfilePanel } from '@/components/ProfilePanel'
 import { StarterQuestions } from '@/components/StarterQuestions'
 import { ChatInterface } from '@/components/ChatInterface'
 import { Dataset, ChatMessage } from '@/lib/types'
-import { createSession, getSession, submitQuery, openStream } from '@/lib/api'
+import { createSession, getSession, submitQuery, openStream, deleteDataset } from '@/lib/api'
 
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -40,7 +40,13 @@ export default function Home() {
                 id: `a-${q.query_id}`,
                 role: 'agent',
                 content: q.answer_text,
+                query_id: q.query_id,
                 summary_table: q.summary_table_json ?? null,
+                generated_code: q.generated_code ?? '',
+                reasoning_trace: q.reasoning_trace ?? '',
+                prompt_tokens: q.prompt_tokens,
+                completion_tokens: q.completion_tokens,
+                cost_usd: q.cost_usd,
               })
             }
           }
@@ -85,26 +91,27 @@ export default function Home() {
     const userMsgId = `u-${Date.now()}`
     const agentMsgId = `a-${Date.now()}`
 
-    setMessages(prev => [
-      ...prev,
-      { id: userMsgId, role: 'user', content: question },
-      { id: agentMsgId, role: 'agent', content: '', streaming: true },
-    ])
-    setStreaming(true)
-
-    // Submit query to get a query_id
+    // Submit query to get a query_id first (before setting messages, so we have the id)
     let queryId: string
     try {
       const result = await submitQuery(sessionId, question)
       queryId = result.query_id
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to submit question'
-      setMessages(prev => prev.map(m =>
-        m.id === agentMsgId ? { ...m, error: msg, streaming: false, content: '' } : m
-      ))
-      setStreaming(false)
+      setMessages(prev => [
+        ...prev,
+        { id: userMsgId, role: 'user', content: question },
+        { id: agentMsgId, role: 'agent', content: '', error: msg, streaming: false },
+      ])
       return
     }
+
+    setMessages(prev => [
+      ...prev,
+      { id: userMsgId, role: 'user', content: question },
+      { id: agentMsgId, role: 'agent', content: '', streaming: true, query_id: queryId },
+    ])
+    setStreaming(true)
 
     // Open SSE stream
     const es = openStream(sessionId, queryId)
@@ -134,6 +141,27 @@ export default function Home() {
                   columns: data.columns as string[],
                   rows: data.rows as (string | number | null)[][],
                 },
+              }
+            : m
+        ))
+      } else if (type === 'code') {
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId
+            ? {
+                ...m,
+                generated_code: (data.generated_code as string) ?? '',
+                reasoning_trace: (data.reasoning_trace as string) ?? '',
+              }
+            : m
+        ))
+      } else if (type === 'usage') {
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId
+            ? {
+                ...m,
+                prompt_tokens: data.prompt_tokens as number,
+                completion_tokens: data.completion_tokens as number,
+                cost_usd: data.cost_usd as number,
               }
             : m
         ))
@@ -173,6 +201,17 @@ export default function Home() {
       es.close()
     }
   }, [sessionId, streaming])
+
+  // ── Dataset delete ────────────────────────────────────────────────────────
+  async function handleDeleteDataset(datasetId: string) {
+    if (!sessionId) return
+    try {
+      await deleteDataset(sessionId, datasetId)
+      setDatasets(prev => prev.filter(d => d.dataset_id !== datasetId))
+    } catch (e) {
+      console.error('Failed to delete dataset', e)
+    }
+  }
 
   // ── Starter question chip clicked ─────────────────────────────────────────
   function handleStarterSelect(question: string) {
@@ -255,7 +294,7 @@ export default function Home() {
           </div>
 
           {datasets.map(d => (
-            <ProfilePanel key={d.dataset_id} dataset={d} />
+            <ProfilePanel key={d.dataset_id} dataset={d} onDelete={handleDeleteDataset} />
           ))}
 
           {allStarterQuestions.length > 0 && (
@@ -275,6 +314,7 @@ export default function Home() {
             streaming={streaming}
             pendingInput={pendingInput}
             onPendingInputClear={() => setPendingInput('')}
+            sessionId={sessionId}
           />
         </div>
       </div>

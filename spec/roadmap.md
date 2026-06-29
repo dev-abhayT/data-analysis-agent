@@ -52,12 +52,12 @@ Non-technical users cannot run pandas/SQL queries. Technical users waste time wr
 
 ### Phase 2 — Full Feature Completion
 
-- **Goal:** Wire all Phase-1 stubs into real functionality: session persistence across reloads, downloadable CSV export, collapsible code trace + reasoning, token usage + estimated cost display, multi-file joining.
+- **Goal:** Wire all Phase-1 stubs into real functionality: session persistence across reloads, downloadable CSV export, collapsible code trace, token usage + estimated cost display, AND graceful meta/descriptive question handling via `describe_dataset`.
 - **Independent slices (parallel build units):**
-  - `slice-a` (backend, `src/`) — session persistence API (load session by ID), CSV export endpoint, code/reasoning trace capture in graph, token usage tracking from Gemini response metadata, multi-file join logic in executor; deps: none
-  - `slice-b` (frontend, `frontend/`) — persistent session in localStorage (reload-safe), export download button wired to API, collapsible code trace accordion, token/cost badge per message, multi-file upload support; deps: none
+  - `slice-a` (backend, `src/`) — `describe_dataset` node + routing update + graph wiring, session-restore API (GET /sessions/{id} full state), CSV export endpoint (GET /sessions/{session_id}/queries/{query_id}/export), code/usage SSE events emitted from `finalize`, token tracking from Gemini metadata; deps: none
+  - `slice-b` (frontend, `frontend/`) — session restore from localStorage on page load, real ExportButton component wired to export API, real CodeTrace accordion (collapsible, displays code or "Answered from dataset profile."), real TokenCost badge (input+output tokens + ~$0.00X cost), ChatInterface SSE handler updated to process `code`/`usage`/`table` events; deps: none
 - **Key surfaces / files:**
-  - slice-a: `src/api/sessions.py`, `src/api/export.py`, `src/tools/executor.py`, `src/db/models.py`, `src/graph/nodes.py`
-  - slice-b: `frontend/src/components/CodeTrace.tsx`, `frontend/src/components/TokenCost.tsx`, `frontend/src/components/ExportButton.tsx`, `frontend/src/app/page.tsx`, `frontend/src/lib/api.ts`
+  - slice-a: `src/api/sessions.py`, `src/api/export.py` (new), `src/graph/nodes.py` (add `describe_dataset`, update `route_question`), `src/graph/agent.py`, `src/graph/edges.py`, `src/graph/state.py`, `src/db/models.py`, tests/test_export.py (new), tests/test_query.py (describe-path tests added)
+  - slice-b: `frontend/src/app/page.tsx`, `frontend/src/components/ExportButton.tsx` (new), `frontend/src/components/CodeTrace.tsx` (new), `frontend/src/components/TokenCost.tsx` (new), `frontend/src/components/ChatInterface.tsx`, `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts`
 - **Gate command:** `uv run pytest tests/ -x -v`
-- **How the user tests it:** Reload the page → previous session data and conversation history still shows. Ask a question → see token count + estimated cost below the answer. Click "Show code" → see pandas code that ran + step-by-step reasoning trace in a collapsible section. Click "Download CSV" → file downloads with filtered/aggregated results. Upload 2 CSV files → ask a cross-file question → get a joined answer.
+- **How the user tests it:** Reload the page → previous session data and conversation history still shows. Ask "What is this data about?" → receive a natural-language description with bullet-point insights, no code shown. Ask a normal analytical question → see token count + estimated cost below the answer, click "Show code" → see the pandas code that ran in a collapsible section, click "Download CSV" → file downloads.

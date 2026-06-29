@@ -36,11 +36,13 @@ def create_app() -> FastAPI:
     from api.sessions import router as sessions_router
     from api.upload import router as upload_router
     from api.query import router as query_router
+    from api.export import router as export_router
 
     app.include_router(health.router)
     app.include_router(sessions_router)
     app.include_router(upload_router)
     app.include_router(query_router)
+    app.include_router(export_router)
 
     # Serve the built Next.js static export at /app
     frontend_out = Path(__file__).resolve().parent.parent.parent / "frontend" / "out"

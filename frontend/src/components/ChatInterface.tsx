@@ -2,6 +2,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { ChatMessage } from '@/lib/types'
 import { SummaryTable } from './SummaryTable'
+import { CodeTrace } from './CodeTrace'
+import { TokenCost } from './TokenCost'
+import { ExportButton } from './ExportButton'
 
 interface Props {
   messages: ChatMessage[]
@@ -9,9 +12,10 @@ interface Props {
   streaming: boolean
   pendingInput?: string
   onPendingInputClear?: () => void
+  sessionId: string | null
 }
 
-export function ChatInterface({ messages, onSendMessage, streaming, pendingInput, onPendingInputClear }: Props) {
+export function ChatInterface({ messages, onSendMessage, streaming, pendingInput, onPendingInputClear, sessionId }: Props) {
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -88,30 +92,29 @@ export function ChatInterface({ messages, onSendMessage, streaming, pendingInput
                         rows={msg.summary_table.rows}
                       />
                     )}
+                    {/* Phase 2: real code trace, token cost, export */}
+                    {!msg.streaming && (
+                      <div className="pt-2 border-t border-gray-100 space-y-2">
+                        {msg.generated_code !== undefined && (
+                          <CodeTrace
+                            generatedCode={msg.generated_code}
+                            reasoningTrace={msg.reasoning_trace}
+                          />
+                        )}
+                        {(msg.prompt_tokens !== undefined || msg.completion_tokens !== undefined) && (
+                          <TokenCost
+                            promptTokens={msg.prompt_tokens}
+                            completionTokens={msg.completion_tokens}
+                            costUsd={msg.cost_usd}
+                          />
+                        )}
+                        {msg.query_id && sessionId && (
+                          <ExportButton sessionId={sessionId} queryId={msg.query_id} />
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
-
-                {/* Phase 2 stubs — always visible, never hidden */}
-                <div className="pt-2 border-t border-gray-100 flex items-center gap-4 flex-wrap">
-                  <span
-                    title="Coming in Phase 2"
-                    className="text-xs text-gray-300 cursor-default select-none"
-                  >
-                    Code it ran (Phase 2)
-                  </span>
-                  <span
-                    title="Coming in Phase 2"
-                    className="text-xs text-gray-300 cursor-default select-none"
-                  >
-                    Token cost (Phase 2)
-                  </span>
-                  <span
-                    title="Coming in Phase 2"
-                    className="text-xs text-gray-300 cursor-default select-none"
-                  >
-                    Download CSV (Phase 2)
-                  </span>
-                </div>
               </div>
             )}
           </div>

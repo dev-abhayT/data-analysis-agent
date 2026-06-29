@@ -7,9 +7,14 @@ from google.genai import types
 
 
 def _is_rate_limit(exc: Exception) -> bool:
-    """Return True if this exception is a 429 / RESOURCE_EXHAUSTED."""
+    """Return True if this is a per-minute 429 worth retrying (not a daily quota)."""
     msg = str(exc)
-    return "429" in msg or "RESOURCE_EXHAUSTED" in msg
+    if "429" not in msg and "RESOURCE_EXHAUSTED" not in msg:
+        return False
+    # Daily quota exhaustion is not worth retrying — the day limit has been hit
+    if "PerDay" in msg or "per_day" in msg.lower():
+        return False
+    return True
 
 
 def _retry_delay_from_exc(exc: Exception, default: float = 35.0) -> float:

@@ -55,3 +55,52 @@ Accepts a plain-English question about an uploaded dataset, classifies whether c
 - [ ] Generated pandas code that raises an exception causes an `error` SSE event and marks the query `status=error`.
 - [ ] The `queries` row in SQLite contains `answer_text` (full answer) and `pandas_code` after a completed query.
 - [ ] Sandboxed code cannot access `os`, `subprocess`, or `open` — attempting to do so in the question causes an `error` event rather than executing the forbidden call.
+
+## Meta / Descriptive Questions (Phase 2)
+
+### What It Does
+
+Detects questions that are about the dataset itself (e.g. "What is this data about?", "Describe this dataset", "Give me a summary", "What are some interesting insights?") and routes them to a `describe_dataset` node instead of `generate_code`, returning a natural-language description with bullet-point observations rather than executing pandas code.
+
+### Detection Patterns
+
+Any question that, after lowercasing and stripping, matches one of the following patterns is routed to the describe path:
+
+- Starts with `"what is this data"`
+- Matches regex `"what are.*insights"`
+- Contains `"describe"`
+- Contains `"summarize"`
+- Contains `"tell me about"`
+- Contains `"overview"`
+- Starts with `"what does this"`
+- Contains `"summary of"`
+
+### `describe_dataset` Node Behaviour
+
+- Takes the dataset profile already stored in state (column names, types, null counts, sample values) and calls Gemini (non-streaming, `call_model`) to produce a 2–3 paragraph natural-language description of the dataset plus 3–5 bullet-point interesting observations.
+- The result is placed in `state["answer_text"]`.
+- No pandas code is generated or executed on this path.
+- `generated_code` (stored as `queries.generated_code` in the DB) is set to `null`/empty string — never fake pandas code.
+
+### Graph Routing
+
+- **Describe path:** `route_question` → `describe_dataset` → `stream_answer`
+- **Analytical path:** `route_question` → `generate_code` → `execute_code` → `stream_answer`
+
+On the describe path, `stream_answer` may call Gemini to stream the pre-populated `answer_text` OR `describe_dataset` may populate `answer_text` directly and `stream_answer` emits it token by token — either implementation is acceptable, but token SSE events must be emitted.
+
+### SSE Events on Describe Path
+
+The describe path emits the same SSE event sequence as the analytical path:
+
+1. `token` events — one per word/chunk of the description.
+2. `code` event — `{type: "code", content: ""}` or `{type: "code", content: "No code — answered from dataset profile."}`.
+3. `usage` event — token count and estimated cost.
+4. `done` event — signals stream completion.
+
+### Success Criteria
+
+- [ ] Questions matching describe patterns route to `describe_dataset` — verified by confirming `generated_code IS NULL` in the `queries` DB row after the query.
+- [ ] The description references actual column names from the uploaded dataset.
+- [ ] The response includes at least 3 bullet-point insights.
+- [ ] The `queries` row has `generated_code = null` after a describe-path query.

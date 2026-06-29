@@ -38,4 +38,11 @@ export interface ChatMessage {
   summary_table?: { columns: string[]; rows: (string | number | null)[][] } | null
   error?: string
   clarification?: string
+  // Phase 2 additions:
+  query_id?: string          // for export button
+  generated_code?: string    // code that ran (empty string = describe path)
+  reasoning_trace?: string   // reasoning from generate_code
+  prompt_tokens?: number
+  completion_tokens?: number
+  cost_usd?: number
 }

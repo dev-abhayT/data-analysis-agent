@@ -102,6 +102,29 @@ async def upload_file(
     })
 
 
+@router.delete("/sessions/{session_id}/datasets/{dataset_id}", status_code=204)
+def delete_dataset(
+    session_id: str,
+    dataset_id: str,
+    db: Session = Depends(get_session),
+) -> None:
+    session = db.get(SessionModel, session_id)
+    if session is None:
+        raise api_error("NOT_FOUND", f"Session {session_id} not found", 404)
+
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None or dataset.session_id != session_id:
+        raise api_error("NOT_FOUND", f"Dataset {dataset_id} not found", 404)
+
+    # Remove file from disk
+    file_path = Path(dataset.file_path)
+    if file_path.exists():
+        file_path.unlink()
+
+    db.delete(dataset)
+    log.info("dataset_deleted", session_id=session_id, dataset_id=dataset_id)
+
+
 def _generate_starter_questions(profile: dict) -> list[str]:
     """Call Gemini synchronously to generate 3 starter questions."""
     from llm.client import LLMClient

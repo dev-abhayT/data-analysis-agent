@@ -1,5 +1,5 @@
 /**
- * Phase 1 smoke tests — run against the live server at http://localhost:8001.
+ * Phase 2 smoke tests — run against the live server at http://localhost:8001.
  *
  * Prerequisites:
  *   1. cd frontend && pnpm build
@@ -7,12 +7,12 @@
  *   3. npx playwright test tests/e2e/
  *
  * These tests verify: page loads + is styled, the upload area is present,
- * the chat input is present, and the Phase-2 stubs are visible but inert.
+ * the chat input is present, and Phase-2 features are wired (no stubs).
  * They do NOT upload a real file (no filesystem side-effect in the gate).
  */
 import { test, expect } from '@playwright/test'
 
-test.describe('Data Analysis Agent — Phase 1 smoke', () => {
+test.describe('Data Analysis Agent — Phase 2 smoke', () => {
   test('page loads at /app/ and shows the Data Analysis Agent heading', async ({ page }) => {
     await page.goto('/app/')
     // Either the loading spinner or the main heading must appear
@@ -76,21 +76,32 @@ test.describe('Data Analysis Agent — Phase 1 smoke', () => {
     await page.goto('/app/')
     await expect(page.locator('h1', { hasText: 'Data Analysis Agent' })).toBeVisible({ timeout: 15_000 })
 
-    // The session ID badge is shown as "Session: xxxxxxxx…"
-    const sessionBadge = page.locator('text=Session:')
+    // The session ID badge is shown as "Session xxxxxxxx…"
+    const sessionBadge = page.locator('text=/Session [0-9a-f]/')
     await expect(sessionBadge).toBeVisible()
   })
 
-  test('Phase 2 stubs are not shown before any message (empty state)', async ({ page }) => {
+  test('empty chat state shows the hint text', async ({ page }) => {
     await page.goto('/app/')
     await expect(page.locator('h1', { hasText: 'Data Analysis Agent' })).toBeVisible({ timeout: 15_000 })
 
     // Empty state hint text
-    const hint = page.getByText('Upload a file and ask a question to get started.')
+    const hint = page.getByText('Upload a CSV or Excel file, then ask a question to get started.')
     await expect(hint).toBeVisible()
+  })
 
-    // Phase 2 stubs only appear inside agent message cards — not visible on empty page
+  test('Phase 2 stubs are removed — Code it ran stub is not present', async ({ page }) => {
+    await page.goto('/app/')
+    await expect(page.locator('h1', { hasText: 'Data Analysis Agent' })).toBeVisible({ timeout: 15_000 })
+
+    // Phase 2 stubs should be gone — real features replace them
     const stub = page.locator('text=Code it ran (Phase 2)')
     await expect(stub).not.toBeVisible()
+
+    const tokenStub = page.locator('text=Token cost (Phase 2)')
+    await expect(tokenStub).not.toBeVisible()
+
+    const downloadStub = page.locator('text=Download CSV (Phase 2)')
+    await expect(downloadStub).not.toBeVisible()
   })
 })
