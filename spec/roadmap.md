@@ -1,62 +1,63 @@
-# Roadmap
-
-> Fill in each section. Run `/zero-shot-build [your idea]` to have it filled automatically.
-
----
+# Data Analysis Agent — Roadmap
 
 ## What This Agent Does
 
-<!-- FILL IN: One paragraph describing what this agent does, who uses it, and what problem it solves. -->
+A chat-style web data analysis agent that lets users upload CSV or Excel files and ask plain-English questions about their data. The agent automatically profiles uploaded files, suggests starter questions, and streams prose answers backed by real pandas computations. It targets both technical owners and non-technical stakeholders who need to extract insights from tabular data without writing code.
 
 ## Who Uses It
 
-<!-- FILL IN: Primary user(s). What is their role? What are they trying to accomplish? -->
+Primary users: the technical owner and non-technical stakeholders (analysts, managers) who need to understand their data. Users upload a file, ask questions in plain English, and receive production-quality answers they can act on.
 
 ## Core Problem Being Solved
 
-<!-- FILL IN: What manual or broken process does this agent replace or improve? -->
+Non-technical users cannot run pandas/SQL queries. Technical users waste time writing boilerplate data exploration code for every new dataset. This agent eliminates both problems: it profiles the data automatically, lets users ask questions naturally, and generates + runs the code on their behalf — streaming the answer back in prose.
 
 ## Success Criteria
 
-<!-- FILL IN: How do we know the agent is working? List 3-5 measurable outcomes. -->
-
-- [ ] <!-- criterion 1 -->
-- [ ] <!-- criterion 2 -->
-- [ ] <!-- criterion 3 -->
+- [ ] User uploads a CSV and sees a complete data profile (row count, columns, types, nulls, sample values) within 5 seconds
+- [ ] Agent suggests 3 relevant starter questions tailored to the actual column names and data
+- [ ] User asks a plain-English question and receives a streaming answer within 30 seconds backed by real pandas execution
+- [ ] Optional inline summary table (top-N rows or aggregation) renders in the chat response
+- [ ] Every query, generated code, and result is stored in SQLite for full audit trail
 
 ## What This Agent Does NOT Do (Out of Scope)
 
-<!-- FILL IN: Explicit exclusions prevent scope creep. List things the agent will never do. -->
+- No authentication or access control — open shared access
+- No cloud storage — files stored on local server only
+- No SQL databases as data sources (CSV/Excel only)
+- No scheduled/automated reports — interactive queries only
+- No multi-user isolation or tenancy
 
 ## Key Constraints
 
-<!-- FILL IN: Hard limits — budget, latency, compliance, API rate limits, etc. -->
+- Files up to 100 MB each; answers within 30 seconds
+- LLM: Google Gemini via `AGENT_GEMINI_API_KEY` (already in `.env`)
+- Files stored on local filesystem under `data/uploads/`
+- Full audit trail required: every query, code run, result, and export stored in SQLite
+- Production-quality answers — users act on them
 
 ## Phases of Development
 
-<!-- FILL IN: The spec-writer fills these in. One phase = one user-testable increment, behind a human testing gate. Default each phase's slices to INDEPENDENT so generators build them concurrently; declare a dependency only when a slice truly needs another's output. Use the per-phase template below — one block per phase. -->
+### Phase 1 — Upload, Profile, and Ask
 
-> **Phase 1 is the smallest first-time-right user-testable win.** It must work perfectly the first time the user tests it — zero rough edges on the tested path. Its backend is minimal but REAL on the one core path (no fake data on the tested path). Its frontend is visually complete: real UI for the one working path PLUS clearly-labelled NON-FUNCTIONAL stubs for everything coming later, so the user sees the vision (a stub must never be mistaken for a bug). Each later phase wires those stubs into real functionality, one increment at a time.
-
-### Phase 1 — <!-- short name -->
-
-- **Goal:** <!-- FILL IN: the single smallest user-testable win this phase delivers. -->
-- **Independent slices (parallel build units):** <!-- FILL IN: each slice is a disjoint unit a single generator owns. Note its surface (frontend / backend) and any declared dependency on another slice (default: none). -->
-  - `slice-a` (backend) — <!-- what it builds; deps: none -->
-  - `slice-b` (frontend) — <!-- what it builds; deps: none -->
-- **Key surfaces / files:** <!-- FILL IN: the files/dirs each slice touches. frontend writes the frontend surface; backend writes src/. Never the same file. -->
-- **Gate command:** <!-- FILL IN: one exact runnable command that proves the phase works — real LLM/API via .env keys, production DB driver (never SQLite-as-substitute). e.g. `uv run pytest tests/test_phase1.py` -->
-- **How the user tests it (handoff seed):** <!-- FILL IN: exact run command(s), what to click / look at, the expected result, and which parts are labelled stubs vs real. -->
-
-### Phase 2 — <!-- short name -->
-
-- **Goal:** <!-- FILL IN: next user-testable increment (typically wires a Phase-1 stub into real functionality). -->
+- **Goal:** User uploads a CSV, sees an auto-generated data profile and 3 starter questions, types a question, and receives a streaming Gemini answer with an optional inline summary table — all real end-to-end.
 - **Independent slices (parallel build units):**
-  - `slice-a` (backend) — <!-- ...; deps: none -->
-  - `slice-b` (frontend) — <!-- ...; deps: none -->
-- **Key surfaces / files:** <!-- FILL IN -->
-- **Gate command:** <!-- FILL IN: exact runnable command, real LLM/API + production DB driver -->
-- **How the user tests it (handoff seed):** <!-- FILL IN -->
+  - `slice-a` (backend, `src/`) — file upload endpoint, pandas profiling tool, starter-question generation via Gemini, LangGraph analysis graph, SSE streaming query endpoint, Gemini streaming support, DB models (sessions/datasets/queries); deps: none
+  - `slice-b` (frontend, `frontend/`) — file upload dropzone, profile panel, starter-question chips, chat interface with streaming text renderer, inline summary table; clearly-labelled stubs for export/code-trace/token-cost; deps: none
+- **Key surfaces / files:**
+  - slice-a: `src/api/upload.py`, `src/api/query.py`, `src/api/sessions.py`, `src/tools/profiler.py`, `src/tools/executor.py`, `src/graph/nodes.py`, `src/graph/state.py`, `src/graph/agent.py`, `src/graph/edges.py`, `src/graph/runner.py`, `src/db/models.py`, `src/llm/providers/gemini.py`, `src/prompts/analysis.md`, `src/api/__init__.py`, `src/config/settings.py`
+  - slice-b: `frontend/src/app/page.tsx`, `frontend/src/components/FileUploader.tsx`, `frontend/src/components/ProfilePanel.tsx`, `frontend/src/components/StarterQuestions.tsx`, `frontend/src/components/ChatInterface.tsx`, `frontend/src/components/SummaryTable.tsx`, `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts`
+- **Gate command:** `uv run alembic upgrade head && uv run pytest tests/ -x -v`
+- **How the user tests it:** Open `http://localhost:8001/app/` → drag-drop a CSV file → see profile card appear (row count, column names, data types, null counts, 3 sample values per column) → see 3 suggested questions → click one or type a question → watch answer stream word by word → see optional summary table below the answer. Export button and code-trace section are clearly labelled "[Coming in Phase 2]" stubs and never look like bugs.
 
-<!-- Repeat the per-phase block for every phase. -->
+### Phase 2 — Full Feature Completion
 
+- **Goal:** Wire all Phase-1 stubs into real functionality: session persistence across reloads, downloadable CSV export, collapsible code trace + reasoning, token usage + estimated cost display, multi-file joining.
+- **Independent slices (parallel build units):**
+  - `slice-a` (backend, `src/`) — session persistence API (load session by ID), CSV export endpoint, code/reasoning trace capture in graph, token usage tracking from Gemini response metadata, multi-file join logic in executor; deps: none
+  - `slice-b` (frontend, `frontend/`) — persistent session in localStorage (reload-safe), export download button wired to API, collapsible code trace accordion, token/cost badge per message, multi-file upload support; deps: none
+- **Key surfaces / files:**
+  - slice-a: `src/api/sessions.py`, `src/api/export.py`, `src/tools/executor.py`, `src/db/models.py`, `src/graph/nodes.py`
+  - slice-b: `frontend/src/components/CodeTrace.tsx`, `frontend/src/components/TokenCost.tsx`, `frontend/src/components/ExportButton.tsx`, `frontend/src/app/page.tsx`, `frontend/src/lib/api.ts`
+- **Gate command:** `uv run pytest tests/ -x -v`
+- **How the user tests it:** Reload the page → previous session data and conversation history still shows. Ask a question → see token count + estimated cost below the answer. Click "Show code" → see pandas code that ran + step-by-step reasoning trace in a collapsible section. Click "Download CSV" → file downloads with filtered/aggregated results. Upload 2 CSV files → ask a cross-file question → get a joined answer.
