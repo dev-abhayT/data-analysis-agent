@@ -33,6 +33,8 @@ class AgentState(TypedDict, total=False):
     # Answer
     answer_text: str
     summary_table_json: dict | None
+    chart_spec: dict | None
+    suggested_followups: list[str]
     prompt_tokens: int
     completion_tokens: int
     cost_usd: float

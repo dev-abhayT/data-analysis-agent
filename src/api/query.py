@@ -2,7 +2,7 @@ import json
 import asyncio
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query as QueryParam
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as DBSession
 from pydantic import BaseModel
@@ -54,7 +54,14 @@ def create_query(
 async def stream_query(
     session_id: str,
     query_id: str,
+    dataset_ids: str | None = QueryParam(None),
 ) -> StreamingResponse:
+    parsed_dataset_ids: list[str] | None = (
+        [d.strip() for d in dataset_ids.split(",") if d.strip()]
+        if dataset_ids
+        else None
+    )
+
     async def event_generator():
         # Check if already completed — replay from DB
         with create_db_session() as db:
@@ -72,6 +79,12 @@ async def stream_query(
                 if query.summary_table_json:
                     table = json.loads(query.summary_table_json)
                     yield f"data: {json.dumps({'type': 'table', **table})}\n\n"
+                if query.chart_json:
+                    chart = json.loads(query.chart_json)
+                    yield f"data: {json.dumps({'type': 'chart', **chart})}\n\n"
+                if query.suggestions_json:
+                    suggestions = json.loads(query.suggestions_json)
+                    yield f"data: {json.dumps({'type': 'suggestions', 'questions': suggestions})}\n\n"
                 if query.generated_code:
                     yield f"data: {json.dumps({'type': 'code', 'generated_code': query.generated_code, 'reasoning_trace': query.reasoning_trace or ''})}\n\n"
                 if query.prompt_tokens:
@@ -92,7 +105,7 @@ async def stream_query(
 
         async def run_and_signal():
             try:
-                await run_analysis(session_id, query_id, question, sse_send)
+                await run_analysis(session_id, query_id, question, sse_send, parsed_dataset_ids)
             except Exception as exc:
                 log.error("run_and_signal_error", error=str(exc))
                 loop.call_soon_threadsafe(

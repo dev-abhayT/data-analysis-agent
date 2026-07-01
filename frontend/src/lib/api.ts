@@ -48,8 +48,12 @@ export async function submitQuery(
   return json.data
 }
 
-export function openStream(sessionId: string, queryId: string): EventSource {
-  return new EventSource(`${API_BASE}/api/sessions/${sessionId}/queries/${queryId}/stream`)
+export function openStream(sessionId: string, queryId: string, datasetIds?: string[]): EventSource {
+  let url = `${API_BASE}/api/sessions/${sessionId}/queries/${queryId}/stream`
+  if (datasetIds && datasetIds.length > 0) {
+    url += `?dataset_ids=${encodeURIComponent(datasetIds.join(','))}`
+  }
+  return new EventSource(url)
 }
 
 export async function deleteDataset(sessionId: string, datasetId: string): Promise<void> {

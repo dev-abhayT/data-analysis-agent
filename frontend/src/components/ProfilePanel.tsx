@@ -6,16 +6,37 @@ interface Props {
   onDelete: (datasetId: string) => void
 }
 
+function getTypeBadgeClass(dtype: string): string {
+  const t = dtype.toLowerCase()
+  if (t === 'str' || t === 'object') {
+    return 'bg-violet-50 text-violet-700 border border-violet-200'
+  }
+  if (
+    t === 'float64' || t === 'float32' || t === 'float' ||
+    t === 'int64' || t === 'int32' || t === 'int'
+  ) {
+    return 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+  }
+  if (t === 'bool') {
+    return 'bg-amber-50 text-amber-700 border border-amber-200'
+  }
+  if (t.includes('date') || t.includes('time')) {
+    return 'bg-blue-50 text-blue-700 border border-blue-200'
+  }
+  return 'bg-gray-100 text-gray-600 border border-gray-200'
+}
+
 export function ProfilePanel({ dataset, onDelete }: Props) {
   const [confirming, setConfirming] = useState(false)
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
-      <div className="flex items-center justify-between">
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-2">
         <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700 truncate max-w-[55%]">
           {dataset.filename}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-gray-500">{dataset.row_count.toLocaleString()} rows</span>
           {confirming ? (
             <div className="flex items-center gap-1">
@@ -47,6 +68,7 @@ export function ProfilePanel({ dataset, onDelete }: Props) {
         </div>
       </div>
 
+      {/* Column table */}
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
@@ -58,16 +80,26 @@ export function ProfilePanel({ dataset, onDelete }: Props) {
             </tr>
           </thead>
           <tbody>
-            {dataset.column_names.map(col => (
-              <tr key={col} className="border-b border-gray-50 hover:bg-gray-50">
-                <td className="py-1 font-mono text-gray-800 max-w-20 truncate pr-1">{col}</td>
-                <td className="py-1 text-gray-500">{dataset.column_types[col] ?? '?'}</td>
-                <td className="py-1 text-right text-gray-400">{dataset.null_counts[col] ?? 0}</td>
-                <td className="py-1 pl-2 text-gray-400 max-w-25 truncate">
-                  {(dataset.sample_values[col] ?? []).slice(0, 3).join(', ')}
-                </td>
-              </tr>
-            ))}
+            {dataset.column_names.map(col => {
+              const dtype = dataset.column_types[col] ?? '?'
+              const nullCount = dataset.null_counts[col] ?? 0
+              return (
+                <tr key={col} className="text-xs py-1 border-b border-gray-50 hover:bg-gray-50/80 transition-colors">
+                  <td className="py-1 font-mono text-gray-800 max-w-20 truncate pr-1">{col}</td>
+                  <td className="py-1">
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${getTypeBadgeClass(dtype)}`}>
+                      {dtype}
+                    </span>
+                  </td>
+                  <td className={`py-1 text-right ${nullCount > 0 ? 'text-orange-500 font-medium' : 'text-gray-300'}`}>
+                    {nullCount}
+                  </td>
+                  <td className="py-1 pl-2 text-gray-400 max-w-25 truncate">
+                    {(dataset.sample_values[col] ?? []).slice(0, 3).join(', ')}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

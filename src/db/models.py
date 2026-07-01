@@ -85,6 +85,8 @@ class Query(Base):
     )  # pending|running|clarifying|completed|failed
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary_table_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chart_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggestions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     reasoning_trace: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

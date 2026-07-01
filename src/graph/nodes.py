@@ -59,32 +59,111 @@ _DATE_PATTERN = re.compile(
 
 
 def _detect_chart(table: dict) -> dict | None:
-    """Return a chart spec dict if the table is suitable for charting, else None."""
+    """Return a chart spec dict if the table is suitable for charting, else None.
+
+    Accepts string OR integer year-like (1800-2100) columns as the x-axis so
+    that queries like "movies per year" produce a line chart. Auto-slices to a
+    per-type row limit so large results still produce a readable chart.
+    """
     columns = table.get("columns", [])
     rows = table.get("rows", [])
-    if len(columns) < 2 or len(rows) < 2 or len(rows) > 20:
-        return None
-    # Second column must be numeric
-    try:
-        numeric_vals = [r[1] for r in rows if r[1] is not None]
-        if not numeric_vals or not all(isinstance(v, (int, float)) for v in numeric_vals):
-            return None
-    except (IndexError, TypeError):
+    if len(columns) < 2 or len(rows) < 2:
         return None
 
-    x_key, y_key = columns[0], columns[1]
-    data = [{x_key: r[0], y_key: r[1]} for r in rows if len(r) >= 2]
+    # Categorise every column
+    str_col_idx: int | None = None   # first non-numeric column → preferred x-axis
+    year_col_idx: int | None = None  # first int col where all values look like years
+    num_col_idx: int | None = None   # first purely numeric col (y-axis candidate)
 
-    # Choose chart type
-    first_x = str(rows[0][0]) if rows[0][0] is not None else ""
-    if _DATE_PATTERN.search(first_x):
+    for i in range(len(columns)):
+        vals = [r[i] for r in rows if i < len(r) and r[i] is not None]
+        if not vals:
+            continue
+        if all(isinstance(v, (int, float)) for v in vals):
+            # Year-like: all integers in 1800-2100 range
+            if (year_col_idx is None
+                    and all(isinstance(v, int) and 1800 <= v <= 2100 for v in vals)):
+                year_col_idx = i
+            if num_col_idx is None:
+                num_col_idx = i
+        else:
+            if str_col_idx is None:
+                str_col_idx = i
+
+    # Decide x (label/time) and y (metric) columns
+    if str_col_idx is not None:
+        x_col = str_col_idx
+        # y = first numeric col that is not x
+        y_col = num_col_idx if num_col_idx != x_col else (
+            next((j for j in range(len(columns)) if j != x_col
+                  and all(isinstance(r[j], (int, float))
+                          for r in rows if j < len(r) and r[j] is not None)),
+                 None)
+        )
+    elif year_col_idx is not None:
+        x_col = year_col_idx
+        # y = first numeric col that is not the year col
+        y_col = next(
+            (j for j in range(len(columns))
+             if j != year_col_idx
+             and all(isinstance(r[j], (int, float))
+                     for r in rows if j < len(r) and r[j] is not None)),
+            None,
+        )
+    else:
+        return None
+
+    if y_col is None:
+        return None
+
+    x_key = columns[x_col]
+    y_key = columns[y_col]
+
+    # Choose chart type and per-type row limit
+    first_x = rows[0][x_col] if rows[0][x_col] is not None else ""
+    first_x_str = str(first_x)
+
+    if x_col == year_col_idx:
         chart_type = "line"
+        limit = 50
+    elif _DATE_PATTERN.search(first_x_str):
+        chart_type = "line"
+        limit = 50
     elif len(rows) <= 6:
         chart_type = "pie"
+        limit = 6
     else:
         chart_type = "bar"
+        limit = 20
+
+    chart_rows = rows[:limit]
+    data = [
+        {x_key: r[x_col], y_key: r[y_col]}
+        for r in chart_rows
+        if len(r) > max(x_col, y_col)
+    ]
 
     return {"chart_type": chart_type, "x_key": x_key, "y_key": y_key, "data": data}
+
+
+def _generate_suggestions(question: str, answer_text: str) -> list[str]:
+    """Ask the LLM for 3 short follow-up questions based on the current Q&A."""
+    prompt = (
+        f"A user asked this data question and received the answer below.\n"
+        f"Question: {question}\n"
+        f"Answer: {answer_text[:600]}\n\n"
+        f"Suggest exactly 3 concise follow-up data analysis questions (under 12 words each) "
+        f"that would give additional useful insight.\n"
+        f'Return ONLY valid JSON: {{"suggestions": ["...", "...", "..."]}}'
+    )
+    try:
+        result = LLMClient().call_json(prompt)
+        suggestions = result.get("suggestions", [])
+        if isinstance(suggestions, list):
+            return [str(s).strip() for s in suggestions[:3] if s]
+    except Exception:
+        pass
+    return []
 
 
 def _load_system_prompt() -> str:
@@ -171,46 +250,12 @@ def _dataset_detail(dataset_paths: dict[str, str]) -> str:
 
 
 def route_question(state: AgentState) -> AgentState:
-    try:
-        question = state.get("question", "")
-        dataset_paths = state.get("dataset_paths", {})
-        conversation_history = state.get("conversation_history", [])
-
-        # Pre-LLM check: if the question is a meta/describe question, skip the LLM call
-        if _is_meta_question(question):
-            log.info("route_question", decision="describe", reason="meta_pattern_match")
-            return {**state, "route_decision": "describe", "route_reasoning": "meta/describe question detected"}
-
-        dataset_info = _dataset_summary(dataset_paths)
-
-        history_text = ""
-        if conversation_history:
-            pairs = []
-            for msg in conversation_history:
-                pairs.append(f"{msg['role'].capitalize()}: {msg['content']}")
-            history_text = "\nConversation history:\n" + "\n".join(pairs) + "\n"
-
-        prompt = (
-            f"You are a routing agent. Given a user question about tabular data, "
-            f"decide whether to execute (the question is clear and answerable with pandas) "
-            f"or clarify (the question is ambiguous or references something not in the data).\n\n"
-            f"Available datasets:\n{dataset_info}\n"
-            f"{history_text}\n"
-            f"User question: {question}\n\n"
-            f'Return a JSON object with exactly two keys: '
-            f'"decision" (either "clarify" or "execute") and '
-            f'"reasoning" (one sentence explaining your decision).'
-        )
-
-        result = LLMClient().call_json(prompt)
-        decision = result.get("decision", "execute")
-        reasoning = result.get("reasoning", "")
-
-        log.info("route_question", decision=decision, reasoning=reasoning)
-        return {**state, "route_decision": decision, "route_reasoning": reasoning}
-    except Exception as exc:
-        log.error("route_question_error", error=str(exc))
-        return {**state, "error": str(exc)}
+    question = state.get("question", "")
+    if _is_meta_question(question):
+        log.info("route_question", decision="describe")
+        return {**state, "route_decision": "describe"}
+    log.info("route_question", decision="execute")
+    return {**state, "route_decision": "execute"}
 
 
 def describe_dataset(state: AgentState) -> AgentState:
@@ -324,24 +369,23 @@ def generate_code(state: AgentState) -> AgentState:
 
         history_text = ""
         if conversation_history:
-            pairs = []
-            for msg in conversation_history:
-                pairs.append(f"{msg['role'].capitalize()}: {msg['content']}")
-            history_text = "\nConversation history:\n" + "\n".join(pairs) + "\n"
+            pairs = [
+                f"{m['role'].capitalize()}: {m['content']}"
+                for m in conversation_history
+            ]
+            history_text = "Conversation so far:\n" + "\n".join(pairs) + "\n\n"
 
         retry_prefix = ""
         if execution_error:
             retry_prefix = (
                 f"IMPORTANT: Your previous code failed with this error:\n"
-                f"{execution_error}\n\n"
-                f"Please fix the error and try again.\n\n"
+                f"{execution_error}\n\nPlease fix the error and try again.\n\n"
             )
 
         prompt = (
             f"{retry_prefix}"
-            f"Generate Python/pandas code to answer this question:\n"
-            f"Question: {question}\n\n"
             f"{history_text}"
+            f"Current question: {question}\n\n"
             f"Available DataFrames (already loaded, do NOT re-read files):\n"
             f"{var_mapping}\n\n"
             f"Dataset details:\n{dataset_detail}\n\n"
@@ -349,9 +393,16 @@ def generate_code(state: AgentState) -> AgentState:
             f"1. Assign your final result to a variable named `result`.\n"
             f"2. Never import subprocess, os, sys. Never use open(), eval(), exec().\n"
             f"3. Do not print() — assign to result instead.\n"
-            f"4. Keep code concise.\n\n"
-            f"First, briefly explain your approach (1-2 sentences of reasoning). "
-            f"Then write the pandas code in a ```python code block."
+            f"4. Keep code concise.\n"
+            f"5. CRITICAL — for comparisons, rankings, popularity, distributions, counts, "
+            f"top-N, or trends: return a DataFrame with the aggregated/sorted data. "
+            f"NEVER return a string like 'Most popular: X'. Return the full DataFrame.\n"
+            f"   Example: result = df.groupby('genre').size().reset_index(name='count').sort_values('count', ascending=False)\n"
+            f"6. If the user asks for a PIE chart, limit to the top 6 categories (.head(6)).\n"
+            f"   If the user asks for a BAR chart, limit to the top 15 (.head(15)).\n"
+            f"7. For a single numeric answer (average, total, count) a scalar is fine.\n\n"
+            f"First, briefly explain your approach and any assumption you're making if the question "
+            f"is ambiguous (1-2 sentences). Then write the pandas code in a ```python code block."
         )
 
         system = _load_system_prompt()
@@ -450,14 +501,24 @@ def stream_answer(state: AgentState) -> AgentState:
         question = state.get("question", "")
         execution_result = state.get("execution_result") or {}
         reasoning_trace = state.get("reasoning_trace", "")
+        conversation_history = state.get("conversation_history", [])
 
         result_json = json.dumps(execution_result)
 
+        history_context = ""
+        if conversation_history:
+            recent = conversation_history[-6:]  # last 3 turns
+            pairs = [f"{m['role'].capitalize()}: {m['content']}" for m in recent]
+            history_context = "Recent conversation:\n" + "\n".join(pairs) + "\n\n"
+
         prompt = (
+            f"{history_context}"
             f"The user asked: {question}\n\n"
             f"The pandas code produced this result:\n{result_json}\n\n"
-            f"Write a concise 2-4 sentence prose answer describing what the data shows. "
-            f"Reference specific values from the result. "
+            f"Write a concise 2-4 sentence prose answer. "
+            f"If you made an assumption to interpret this question, state it in one sentence at the start. "
+            f"Reference actual values from the result. "
+            f"If the result has multiple rows, say 'A chart is shown below with the full breakdown.' "
             f"Do not include code. Do not repeat the question."
         )
 
@@ -490,13 +551,11 @@ def stream_answer(state: AgentState) -> AgentState:
         # Gemini 2.5 Flash pricing (per million tokens)
         cost_usd = (prompt_tokens * 0.075 + completion_tokens * 0.3) / 1_000_000
 
-        # Decide whether to show summary table
+        # Show table (and chart) for any result with ≤ 25 rows — no keyword gate
         summary_table_json = None
         rows = execution_result.get("rows", [])
-        if rows and len(rows) <= 20:
-            question_lower = question.lower()
-            if any(kw in question_lower for kw in _TABLE_KEYWORDS):
-                summary_table_json = execution_result
+        if rows and len(rows) <= 25:
+            summary_table_json = execution_result
 
         log.info(
             "stream_answer_done",
@@ -560,6 +619,18 @@ def finalize(state: AgentState) -> AgentState:
 
     final_status = "clarifying" if clarification_question else "completed"
 
+    # Compute derived artefacts BEFORE the DB write so everything is persisted together
+    summary = state.get("summary_table_json")
+    chart_spec: dict | None = None
+    suggestions: list[str] = []
+    if not clarification_question:
+        chart_source = summary or state.get("execution_result") or {}
+        chart_spec = _detect_chart(chart_source)
+        answer_text = state.get("answer_text") or ""
+        question = state.get("question") or ""
+        if answer_text and question:
+            suggestions = _generate_suggestions(question, answer_text)
+
     # Persist all artefacts to DB
     if query_id:
         try:
@@ -578,9 +649,14 @@ def finalize(state: AgentState) -> AgentState:
                     q.cost_usd = state.get("cost_usd") or 0.0
                     q.error_message = state.get("error")
 
-                    summary = state.get("summary_table_json")
                     q.summary_table_json = (
                         json.dumps(summary) if summary is not None else None
+                    )
+                    q.chart_json = (
+                        json.dumps(chart_spec) if chart_spec is not None else None
+                    )
+                    q.suggestions_json = (
+                        json.dumps(suggestions) if suggestions else None
                     )
 
                     if final_status == "completed":
@@ -596,13 +672,12 @@ def finalize(state: AgentState) -> AgentState:
                     json.dumps({"type": "clarification", "question": clarification_question})
                 )
             else:
-                # Table event + chart event
-                summary = state.get("summary_table_json")
                 if summary:
                     stream_callback(json.dumps({"type": "table", **summary}))
-                    chart = _detect_chart(summary)
-                    if chart:
-                        stream_callback(json.dumps({"type": "chart", **chart}))
+                if chart_spec:
+                    stream_callback(json.dumps({"type": "chart", **chart_spec}))
+                if suggestions:
+                    stream_callback(json.dumps({"type": "suggestions", "questions": suggestions}))
 
                 # Code event — emit even if generated_code is empty string (describe path)
                 generated_code = state.get("generated_code")

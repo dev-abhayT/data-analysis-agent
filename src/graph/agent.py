@@ -3,7 +3,6 @@ from langgraph.graph import StateGraph, END
 from graph.state import AgentState
 from graph.nodes import (
     route_question,
-    ask_clarification,
     generate_code,
     execute_code,
     stream_answer,
@@ -24,7 +23,6 @@ def _build_graph() -> StateGraph:
 
     g.add_node("route_question", route_question)
     g.add_node("describe_dataset", describe_dataset)
-    g.add_node("ask_clarification", ask_clarification)
     g.add_node("generate_code", generate_code)
     g.add_node("execute_code", execute_code)
     g.add_node("stream_answer", stream_answer)
@@ -37,7 +35,6 @@ def _build_graph() -> StateGraph:
         "route_question",
         after_route,
         {
-            "ask_clarification": "ask_clarification",
             "generate_code": "generate_code",
             "describe_dataset": "describe_dataset",
             "handle_error": "handle_error",
@@ -52,8 +49,6 @@ def _build_graph() -> StateGraph:
             "handle_error": "handle_error",
         },
     )
-
-    g.add_edge("ask_clarification", "finalize")
 
     g.add_edge("generate_code", "execute_code")
 

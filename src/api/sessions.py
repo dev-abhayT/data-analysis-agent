@@ -47,6 +47,12 @@ def get_session_detail(session_id: str, db: Session = Depends(get_session)) -> d
             "summary_table_json": (
                 json.loads(q.summary_table_json) if q.summary_table_json else None
             ),
+            "chart_json": (
+                json.loads(q.chart_json) if q.chart_json else None
+            ),
+            "suggestions": (
+                json.loads(q.suggestions_json) if q.suggestions_json else None
+            ),
             "generated_code": q.generated_code,
             "reasoning_trace": q.reasoning_trace,
             "prompt_tokens": q.prompt_tokens,

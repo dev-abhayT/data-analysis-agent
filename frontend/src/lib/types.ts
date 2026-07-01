@@ -15,6 +15,8 @@ export interface QueryResult {
   status: 'pending' | 'running' | 'clarifying' | 'completed' | 'failed'
   answer_text?: string
   summary_table_json?: { columns: string[]; rows: (string | number | null)[][] } | null
+  chart_json?: ChartData | null
+  suggestions?: string[] | null
   generated_code?: string
   reasoning_trace?: string
   prompt_tokens?: number
@@ -44,6 +46,7 @@ export interface ChatMessage {
   streaming?: boolean
   summary_table?: { columns: string[]; rows: (string | number | null)[][] } | null
   chart_data?: ChartData | null
+  suggestions?: string[] | null
   error?: string
   clarification?: string
   // Phase 2 additions:

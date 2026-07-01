@@ -6,6 +6,20 @@ interface Props {
   costUsd?: number
 }
 
+function BoltIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className="w-3 h-3 text-amber-400"
+      aria-hidden="true"
+    >
+      <path d="M8.75 2.5a.75.75 0 0 0-1.408-.36L4.342 8H2.75a.75.75 0 0 0-.6 1.2l5 6.75A.75.75 0 0 0 8.5 15.5V10h1.75a.75.75 0 0 0 .6-1.2l-2-2.7V2.5Z" />
+    </svg>
+  )
+}
+
 export function TokenCost({ promptTokens, completionTokens, costUsd }: Props) {
   // Don't render if we have no token data at all
   if (promptTokens === undefined && completionTokens === undefined) return null
@@ -36,10 +50,10 @@ export function TokenCost({ promptTokens, completionTokens, costUsd }: Props) {
 
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-500"
+      className="inline-flex items-center gap-1.5 text-xs text-gray-400"
       title={`Input: ${promptTokens ?? 0} tokens · Output: ${completionTokens ?? 0} tokens`}
     >
-      <span className="text-gray-400">⚡</span>
+      <BoltIcon />
       {total.toLocaleString()} tokens · {costStr}
     </span>
   )

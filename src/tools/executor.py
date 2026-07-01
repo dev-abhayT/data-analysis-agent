@@ -1,4 +1,5 @@
 import ast
+from datetime import date, datetime
 from typing import Any
 import numpy as np
 import pandas as pd
@@ -110,13 +111,22 @@ def execute_pandas_code(
 
 def _serialize(val: Any) -> Any:
     """Convert numpy/pandas types to JSON-serializable Python types."""
-    # numpy scalar types (int64, float64, bool_, etc.) — safe to call .item()
+    # numpy scalar types (int64, float64, bool_, etc.)
     if isinstance(val, np.generic):
-        return val.item()
-    # numpy arrays or pandas Index — should not reach here after the DataFrame path,
-    # but guard anyway by converting to list
+        v = val.item()
+        # np.generic.item() can still return a datetime for datetime64 scalars
+        if isinstance(v, (datetime, date)):
+            return v.isoformat()
+        return v
+    # numpy arrays or pandas Index
     if isinstance(val, (np.ndarray, pd.Index)):
         return val.tolist()
+    # pandas Timestamp / NaT
+    if isinstance(val, pd.Timestamp):
+        return None if pd.isnull(val) else val.isoformat()
+    # Python datetime / date
+    if isinstance(val, (datetime, date)):
+        return val.isoformat()
     try:
         if not isinstance(val, (list, dict, str, bool)) and pd.isna(val):
             return None

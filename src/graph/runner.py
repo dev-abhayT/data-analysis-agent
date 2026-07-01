@@ -17,6 +17,7 @@ async def run_analysis(
     query_id: str,
     question: str,
     sse_send: Callable[[str], None],
+    dataset_ids: list[str] | None = None,
 ) -> None:
     """
     Run the LangGraph analysis agent and stream SSE events via sse_send.
@@ -31,9 +32,12 @@ async def run_analysis(
             return
         query_row.status = "running"
 
-        # Load all datasets for the session
+        # Load datasets for the session (optionally filtered to selected IDs)
         datasets = db.query(Dataset).filter(Dataset.session_id == session_id).all()
-        dataset_paths = {d.id: d.file_path for d in datasets}
+        if dataset_ids:
+            dataset_paths = {d.id: d.file_path for d in datasets if d.id in dataset_ids}
+        else:
+            dataset_paths = {d.id: d.file_path for d in datasets}
 
         # Load conversation history (last 10 completed queries, interleaved)
         from db.models import Query as QueryModel

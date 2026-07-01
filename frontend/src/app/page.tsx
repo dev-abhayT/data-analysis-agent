@@ -12,6 +12,7 @@ export default function Home() {
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [initLoading, setInitLoading] = useState(true)
   const [datasets, setDatasets] = useState<Dataset[]>([])
+  const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set())
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [pendingInput, setPendingInput] = useState('')
@@ -42,6 +43,8 @@ export default function Home() {
                 content: q.answer_text,
                 query_id: q.query_id,
                 summary_table: q.summary_table_json ?? null,
+                chart_data: q.chart_json ?? null,
+                suggestions: q.suggestions ?? null,
                 generated_code: q.generated_code ?? '',
                 reasoning_trace: q.reasoning_trace ?? '',
                 prompt_tokens: q.prompt_tokens,
@@ -79,6 +82,19 @@ export default function Home() {
     }
   }, [])
 
+  // Keep selectedDatasetIds in sync with the datasets list (select all by default)
+  useEffect(() => {
+    setSelectedDatasetIds(prev => {
+      const allIds = new Set(datasets.map(d => d.dataset_id))
+      // Add newly uploaded datasets; remove deleted ones
+      const next = new Set([...prev].filter(id => allIds.has(id)))
+      for (const id of allIds) {
+        if (!prev.has(id)) next.add(id)
+      }
+      return next
+    })
+  }, [datasets])
+
   // ── Upload success ────────────────────────────────────────────────────────
   function handleUploadSuccess(dataset: Dataset) {
     setDatasets(prev => [...prev, dataset])
@@ -114,7 +130,7 @@ export default function Home() {
     setStreaming(true)
 
     // Open SSE stream
-    const es = openStream(sessionId, queryId)
+    const es = openStream(sessionId, queryId, [...selectedDatasetIds])
     esRef.current = es
 
     es.onmessage = (event: MessageEvent) => {
@@ -171,6 +187,12 @@ export default function Home() {
               }
             : m
         ))
+      } else if (type === 'suggestions') {
+        setMessages(prev => prev.map(m =>
+          m.id === agentMsgId
+            ? { ...m, suggestions: data.questions as string[] }
+            : m
+        ))
       } else if (type === 'clarification') {
         setMessages(prev => prev.map(m =>
           m.id === agentMsgId
@@ -206,7 +228,7 @@ export default function Home() {
       setStreaming(false)
       es.close()
     }
-  }, [sessionId, streaming])
+  }, [sessionId, streaming, selectedDatasetIds])
 
   // ── Dataset delete ────────────────────────────────────────────────────────
   async function handleDeleteDataset(datasetId: string) {
@@ -222,6 +244,20 @@ export default function Home() {
   // ── Starter question chip clicked ─────────────────────────────────────────
   function handleStarterSelect(question: string) {
     setPendingInput(question)
+  }
+
+  // ── Dataset selector toggle ───────────────────────────────────────────────
+  function handleDatasetToggle(datasetId: string) {
+    setSelectedDatasetIds(prev => {
+      const next = new Set(prev)
+      if (next.has(datasetId)) {
+        // Don't allow deselecting the last one
+        if (next.size > 1) next.delete(datasetId)
+      } else {
+        next.add(datasetId)
+      }
+      return next
+    })
   }
 
   // ── New session (on session-not-found error) ──────────────────────────────
@@ -321,6 +357,10 @@ export default function Home() {
             pendingInput={pendingInput}
             onPendingInputClear={() => setPendingInput('')}
             sessionId={sessionId}
+            datasets={datasets}
+            selectedDatasetIds={selectedDatasetIds}
+            onDatasetToggle={handleDatasetToggle}
+            onSuggestionSelect={q => setPendingInput(q)}
           />
         </div>
       </div>
